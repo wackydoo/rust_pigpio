@@ -22,6 +22,16 @@ const BAD_LEVEL: i32 = -5;
 const BAD_PUD: i32 = -6;
 const DEFAULT_ERROR: &str = "Unknown error.";
 
+// wave tx mode 
+const PI_WAVE_MODE_ONE_SHOT: u32 = 0;
+const PI_WAVE_MODE_REPEAT: u32 = 1;
+const PI_WAVE_MODE_ONE_SHOT_SYNC: u32 = 2;
+const PI_WAVE_MODE_REPEAT_SYNC: u32 = 3;
+// tx send results
+const PI_BAD_WAVE_ID: i32 =   -66 ;// non existent wave id
+const PI_BAD_WAVE_MODE:i32 =     -33; // waveform mode not 0-3
+
+
 pub const INPUT: GpioMode = GpioMode::INPUT;
 pub const OUTPUT: GpioMode = GpioMode::OUTPUT;
 
@@ -30,6 +40,16 @@ pub const OFF: Level = Level::OFF;
 
 pub type GpioResult = Result<(), String>;
 pub type GpioResponse = Result<u32, String>;
+
+#[repr(C)]
+#[derive(Debug)]
+pub struct gpioPulse_t {
+    pub gpioOn: u32,
+    pub gpioOff: u32,
+    pub usDelay: u32,
+} 
+
+pub type PulseTrain = Vec<gpioPulse_t>;
 
 #[link(name = "pigpio", kind = "dylib")]
 extern "C" {
@@ -45,12 +65,62 @@ extern "C" {
     fn gpioDelay(micros: u32) -> u32;
 
     fn gpioSetAlertFunc(user_gpio: u32, alert_func: extern fn (u32, u32, u32)) -> i32;
-//    fn gpioSetAlertFuncEx(user_gpio: u32, f: gpioAlertFuncEx_t, void* userdata) -> i32;
+    //    fn gpioSetAlertFuncEx(user_gpio: u32, f: gpioAlertFuncEx_t, void* userdata) -> i32;
 
     fn gpioTrigger(user_gpio: u32, pulseLen: u32, level: u32) -> i32; //
     fn gpioSetWatchdog(user_gpio: u32, timeout: u32) -> i32; //
+
+    // ** waveform functions
+    // clear all defined waveforms
+    fn gpioWaveClear() -> i32; 
+    // add waveform returning number of pulses
+    // fn gpioWaveAddGeneric(numPulses: u32, gpioPulse_t *pulses) -> i32 ; 
+    fn gpioWaveAddGeneric(numPulses: u32, pulses: *const gpioPulse_t) -> i32 ; 
+    // create waveform loaded by WaveAddGeneric
+    // returns waveid >= zero if successful
+    fn gpioWaveCreate() -> i32; 
+    //
+    fn gpioWaveTxSend( wave_id: u32,  wave_mode: u32) -> i32;
+
+    
 }
 
+pub fn wave_tx_send_once(wave_id: u32) -> GpioResult {
+    let result: i32 = unsafe { gpioWaveTxSend(wave_id, PI_WAVE_MODE_ONE_SHOT) };
+    match result {
+        PI_BAD_WAVE_MODE => Err("Invalid mode in call to gpioWaveTxSend".to_string()),
+        PI_BAD_WAVE_ID => Err("Invalide wave id in call to gpioWaveTxSend".to_string()),
+        _ => Ok(())
+    }
+}
+
+pub fn wave_create() -> GpioResponse {
+    let result:i32 = unsafe { gpioWaveCreate() };
+    match result {
+        d if d >= 0 => Ok(result as u32),
+        _ => Err(format!("Can't create wave ({})",result ))
+    }
+}
+
+pub fn wave_clear() -> GpioResult {
+    let result: i32 = unsafe {gpioWaveClear()};
+    match result {
+        0  => Ok(()),
+        _ => Err("Error clearing in call to gpioWaveClear".to_string())
+    }
+}
+
+pub fn wave_add_generic(numPulses: u32,  pulses: &PulseTrain) -> GpioResponse {
+    const PI_TOO_MANY_PULSES:i32 =  -36;
+    let result = unsafe {
+        gpioWaveAddGeneric(numPulses, pulses.as_ptr()) };
+    let expected_result = numPulses as i32;
+    match result {
+        PI_TOO_MANY_PULSES => Err("Initialize failed".to_string()),
+        expected_result => Ok(result as u32),
+        _ => Err(format!("Add waveform failed (unknown {}",result))
+    }
+}
 
 
 
